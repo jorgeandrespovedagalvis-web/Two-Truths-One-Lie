@@ -39,7 +39,7 @@ button.opt{cursor:pointer}button.opt:hover{border-color:var(--deep)}
 .avs{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:8px 0}
 .av{font-size:1.5rem;padding:3px 0;border-radius:12px;border:2px solid transparent;background:rgba(255,255,255,.75);cursor:pointer}
 .av.sel{border-color:var(--deep);background:var(--accent)}
-.hero{width:100%;max-width:420px;display:block;margin:0 auto 6px}
+.center{min-height:62vh;display:flex;flex-direction:column;justify-content:center;align-items:center}.center .btn{max-width:360px}.hero{width:100%;max-width:420px;display:block;margin:0 auto 6px}
 </style>
 </head>
 <body>
@@ -70,17 +70,6 @@ const board = () => '<ol class="rank">' + [...S.players].sort((a, b) => b.score 
 const chips = showDone => '<div class="chips">' + S.players.map(p =>
   `<span class="chip ${showDone && S.stmts.some(s => s.player_id === p.id) ? 'done' : ''}">${p.avatar || '🙂'} ${esc(p.name)}${showDone && S.stmts.some(s => s.player_id === p.id) ? ' ✓' : ''}</span>`).join('') + '</div>';
 
-// ---------- Entry ----------
-(async () => {
-  if (!code) return landing();
-  const {data} = await sb.from('ttl_rooms').select('code').eq('code', code).maybeSingle();
-  if (!data) { app.innerHTML = '<h2>Room not found</h2><button class="btn" onclick="location.search=\'\'">Back</button>'; return; }
-  isHost = !!localStorage.getItem('host_' + code);
-  me = JSON.parse(localStorage.getItem('p_' + code) || 'null');
-  if (!isHost && !me) return joinForm();
-  start();
-})();
-
 const AVATARS = ['🦊','🐼','🐸','🦄','🐙','🐵','🐯','🐧','🦁','🐶','🐱','🐰','🐻','🦉','🐲','🦖'];
 let pickedAv = AVATARS[0];
 const hero = () => `<svg class="hero" viewBox="0 0 360 135" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Truth and lie faces">
@@ -99,9 +88,9 @@ const hero = () => `<svg class="hero" viewBox="0 0 360 135" xmlns="http://www.w3
 <circle cx="248" cy="104" r="16" fill="#dc2626"/><path d="M241 97 l14 14 M255 97 l-14 14" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
 <text x="290" y="131" text-anchor="middle" font-size="15" font-weight="800" fill="#dc2626" font-family="system-ui">LIE</text></svg>`;
 function landing() {
-  app.innerHTML = hero() + `<p style="font-size:1.8rem;margin:2px">🤥 🎭 🤔 ✅ 🕵️</p><h2>Can you spot the lie?</h2>
+  app.innerHTML = `<div class="center">${hero()}<p style="font-size:1.8rem;margin:2px">🤥 🎭 🤔 ✅ 🕵️</p><h2>Can you spot the lie?</h2>
   <p class="muted">Two truths and one lie... the class has to guess!</p>
-  <button class="btn" onclick="hostGame()">📺 Create room (teacher screen)</button>`;
+  <button class="btn" onclick="hostGame()">📺 Create room (teacher screen)</button></div>`;
 }
 async function hostGame() {
   const c = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -239,6 +228,18 @@ function playerView() {
   if (!st) return head + '<p>Loading...</p>';
   return head + `<h2>${st.player_id === me.id ? '🎤 It\'s your turn! Convince the class!' : esc(nameOf(st.player_id)) + ': which one is the lie? 🤔'}</h2>` + cards(st, r.revealed || [], false);
 }
+
+// ---------- Entry ----------
+(async () => {
+  if (!code) return landing();
+  const {data} = await sb.from('ttl_rooms').select('code').eq('code', code).maybeSingle();
+  if (!data) { app.innerHTML = '<h2>Room not found</h2><button class="btn" onclick="location.search=\'\'">Back</button>'; return; }
+  isHost = !!localStorage.getItem('host_' + code);
+  me = JSON.parse(localStorage.getItem('p_' + code) || 'null');
+  if (!isHost && !me) return joinForm();
+  start();
+})();
+
 </script>
 </body>
 </html>
