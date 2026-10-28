@@ -74,9 +74,7 @@ const chips = showDone => '<div class="chips">' + S.players.map(p =>
 })();
 
 function landing() {
-  app.innerHTML = `<h2>Host a game</h2><button class="btn" onclick="hostGame()">📺 Create room (teacher screen)</button>
-  <h2>Or join</h2><input type="text" id="rc" placeholder="Room code" maxlength="4" style="text-transform:uppercase;text-align:center">
-  <button class="btn" onclick="location.search='?room='+$('#rc').value.trim().toUpperCase()">📱 Join</button>`;
+  app.innerHTML = `<h2>Host a game</h2><button class="btn" onclick="hostGame()">📺 Create room (teacher screen)</button>`;
 }
 async function hostGame() {
   const c = Math.random().toString(36).slice(2, 6).toUpperCase();
