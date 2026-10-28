@@ -44,8 +44,8 @@ button.opt{cursor:pointer}button.opt:hover{border-color:var(--accent)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ====== 1) PASTE YOUR SUPABASE VALUES HERE (Project Settings > API) ======
-const SUPABASE_URL = 'https://partyseqrlqgdbxehrhf.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhcnR5c2VxcmxxZ2RieGVocmhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxNTEzMTgsImV4cCI6MjEwODcyNzMxOH0.xUIOtYiusPai3gGcO-AVOtpVVVQlOZoyv11zn6uEjRk';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_KEY = 'YOUR-ANON-PUBLIC-KEY';
 // =========================================================================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -65,7 +65,7 @@ const chips = showDone => '<div class="chips">' + S.players.map(p =>
 // ---------- Entry ----------
 (async () => {
   if (!code) return landing();
-  const {data} = await sb.from('rooms').select('code').eq('code', code).maybeSingle();
+  const {data} = await sb.from('ttl_rooms').select('code').eq('code', code).maybeSingle();
   if (!data) { app.innerHTML = '<h2>Room not found</h2><button class="btn" onclick="location.search=\'\'">Back</button>'; return; }
   isHost = !!localStorage.getItem('host_' + code);
   me = JSON.parse(localStorage.getItem('p_' + code) || 'null');
@@ -80,7 +80,7 @@ function landing() {
 }
 async function hostGame() {
   const c = Math.random().toString(36).slice(2, 6).toUpperCase();
-  const {error} = await sb.from('rooms').insert({code: c});
+  const {error} = await sb.from('ttl_rooms').insert({code: c});
   if (error) return alert(error.message);
   localStorage.setItem('host_' + c, '1');
   location.search = '?room=' + c;
@@ -94,7 +94,7 @@ async function join() {
   const name = $('#nm').value.trim();
   if (!name) return;
   const id = crypto.randomUUID();
-  const {error} = await sb.from('players').insert({id, room_code: code, name});
+  const {error} = await sb.from('ttl_players').insert({id, room_code: code, name});
   if (error) return alert(error.message);
   me = {id, name};
   localStorage.setItem('p_' + code, JSON.stringify(me));
@@ -108,7 +108,7 @@ function start() {
   refresh();
 }
 async function refresh() {
-  const q = t => sb.from(t).select('*').eq(t === 'rooms' ? 'code' : 'room_code', code);
+  const q = t => sb.from('ttl_' + t).select('*').eq(t === 'rooms' ? 'code' : 'room_code', code);
   const [r, p, s, v] = await Promise.all([q('rooms').maybeSingle(), q('players').order('joined_at'), q('statements').order('created_at'), q('votes')]);
   S = {room: r.data, players: p.data || [], stmts: s.data || [], votes: v.data || []};
   render();
@@ -122,9 +122,9 @@ function render() {
 }
 
 // ---------- Host actions ----------
-const setStatus = async s => { await sb.from('rooms').update({status: s}).eq('code', code); refresh(); };
+const setStatus = async s => { await sb.from('ttl_rooms').update({status: s}).eq('code', code); refresh(); };
 async function startVoting() {
-  await sb.from('rooms').update({status: 'voting', current_statement_id: S.stmts[0].id}).eq('code', code); refresh();
+  await sb.from('ttl_rooms').update({status: 'voting', current_statement_id: S.stmts[0].id}).eq('code', code); refresh();
 }
 async function reveal() {
   if (busy) return; busy = true;
@@ -134,21 +134,21 @@ async function reveal() {
   d[st.player_id] = (d[st.player_id] || 0) + 5 * wrong;          // +5 per player fooled
   await Promise.all(Object.entries(d).map(([id, a]) => {
     const p = S.players.find(x => x.id === id);
-    return p && sb.from('players').update({score: p.score + a}).eq('id', id);
+    return p && sb.from('ttl_players').update({score: p.score + a}).eq('id', id);
   }));
-  await sb.from('rooms').update({status: 'reveal'}).eq('code', code);
+  await sb.from('ttl_rooms').update({status: 'reveal'}).eq('code', code);
   busy = false; refresh();
 }
 async function next() {
   const n = S.stmts[S.stmts.findIndex(s => s.id === S.room.current_statement_id) + 1];
-  await sb.from('rooms').update(n ? {status: 'voting', current_statement_id: n.id} : {status: 'podium'}).eq('code', code);
+  await sb.from('ttl_rooms').update(n ? {status: 'voting', current_statement_id: n.id} : {status: 'podium'}).eq('code', code);
   refresh();
 }
 async function resetGame() {
-  await sb.from('votes').delete().eq('room_code', code);
-  await sb.from('statements').delete().eq('room_code', code);
-  await sb.from('players').update({score: 0}).eq('room_code', code);
-  await sb.from('rooms').update({status: 'lobby', current_statement_id: null}).eq('code', code);
+  await sb.from('ttl_votes').delete().eq('room_code', code);
+  await sb.from('ttl_statements').delete().eq('room_code', code);
+  await sb.from('ttl_players').update({score: 0}).eq('room_code', code);
+  await sb.from('ttl_rooms').update({status: 'lobby', current_statement_id: null}).eq('code', code);
   refresh();
 }
 
@@ -176,12 +176,12 @@ function hostView() {
 async function submitForm() {
   const lines = [0, 1, 2].map(i => $('#l' + i).value.trim()), lie = document.querySelector('input[name=lie]:checked');
   if (lines.some(l => l.length < 3) || !lie) return alert('Write all three statements and mark the lie.');
-  const {error} = await sb.from('statements').upsert({room_code: code, player_id: me.id, lines, lie_index: +lie.value}, {onConflict: 'room_code,player_id'});
+  const {error} = await sb.from('ttl_statements').upsert({room_code: code, player_id: me.id, lines, lie_index: +lie.value}, {onConflict: 'room_code,player_id'});
   if (error) return alert(error.message);
   lastKey = null; refresh();
 }
 async function vote(i) {
-  await sb.from('votes').insert({room_code: code, statement_id: cur().id, voter_id: me.id, guess: i});
+  await sb.from('ttl_votes').insert({room_code: code, statement_id: cur().id, voter_id: me.id, guess: i});
   refresh();
 }
 function playerView() {
