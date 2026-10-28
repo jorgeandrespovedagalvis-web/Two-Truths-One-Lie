@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Two Truths & a Lie - Live Classroom</title>
+<style>
+:root{--bg1:#1e1b4b;--bg2:#6d28d9;--card:rgba(255,255,255,.1);--accent:#fbbf24;--stop:#ef4444;--ok:#22c55e;--text:#fff;--muted:#c4b5fd}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:system-ui,Segoe UI,sans-serif;color:var(--text);background:linear-gradient(135deg,var(--bg1),var(--bg2));display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:720px}
+h1{text-align:center;margin:8px 0 2px;font-size:2.2rem;letter-spacing:2px;color:var(--accent)}
+.sub{text-align:center;color:var(--muted);margin:0 0 16px}
+.card{background:var(--card);border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:20px;text-align:center;backdrop-filter:blur(6px)}
+.code{background:var(--accent);color:#1e1b4b;padding:2px 14px;border-radius:10px;font-weight:800;letter-spacing:4px}
+.muted{color:var(--muted);word-break:break-all}
+.btn{display:block;width:100%;margin:12px 0 0;padding:14px;border:0;border-radius:12px;font-size:1.05rem;font-weight:700;cursor:pointer;background:var(--accent);color:#1e1b4b}
+.btn.stop{background:var(--stop);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+input[type=text],textarea{width:100%;padding:12px;border-radius:10px;border:2px solid transparent;font:inherit;background:rgba(255,255,255,.95);color:#1e1b4b}
+textarea{resize:none;height:64px}
+.row{display:flex;gap:10px;align-items:center;margin:10px 0;text-align:left}
+.row label{font-size:.8rem;white-space:nowrap;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0}
+.chip{background:rgba(255,255,255,.15);padding:6px 12px;border-radius:20px}
+.chip.done{background:var(--ok)}
+.opt{text-align:left;padding:14px;margin:10px 0;border-radius:12px;background:rgba(255,255,255,.15);border:2px solid transparent;font-size:1.05rem;color:var(--text);width:100%;font-family:inherit}
+button.opt{cursor:pointer}button.opt:hover{border-color:var(--accent)}
+.opt small{float:right;opacity:.9}
+.opt.lie{background:var(--stop)}.opt.truth{background:rgba(34,197,94,.35)}
+.rank{list-style:none;padding:0;text-align:left}
+.rank li{display:flex;justify-content:space-between;background:var(--card);margin:6px 0;padding:10px 14px;border-radius:10px}
+.rank li:first-child{background:var(--accent);color:#1e1b4b;font-weight:800}
+.qr{border-radius:12px;background:#fff;padding:8px}
+</style>
+</head>
+<body>
+<main>
+  <h1>2 TRUTHS &amp; 1 LIE</h1>
+  <p class="sub">Live Classroom Game</p>
+  <div class="card" id="app">Loading...</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ====== 1) PASTE YOUR SUPABASE VALUES HERE (Project Settings > API) ======
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_KEY = 'YOUR-ANON-PUBLIC-KEY';
+// =========================================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = s => document.querySelector(s), app = $('#app');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let code = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
+let isHost = false, me = null, lastKey = null, busy = false;
+let S = {room: null, players: [], stmts: [], votes: []};
+
+const cur = () => S.stmts.find(s => s.id === S.room?.current_statement_id);
+const nameOf = id => S.players.find(p => p.id === id)?.name || '?';
+const board = () => '<ol class="rank">' + [...S.players].sort((a, b) => b.score - a.score)
+  .map(p => `<li><span>${esc(p.name)}</span><b>${p.score}</b></li>`).join('') + '</ol>';
+const chips = showDone => '<div class="chips">' + S.players.map(p =>
+  `<span class="chip ${showDone && S.stmts.some(s => s.player_id === p.id) ? 'done' : ''}">${esc(p.name)}${showDone && S.stmts.some(s => s.player_id === p.id) ? ' ✓' : ''}</span>`).join('') + '</div>';
+
+// ---------- Entry ----------
+(async () => {
+  if (!code) return landing();
+  const {data} = await sb.from('rooms').select('code').eq('code', code).maybeSingle();
+  if (!data) { app.innerHTML = '<h2>Room not found</h2><button class="btn" onclick="location.search=\'\'">Back</button>'; return; }
+  isHost = !!localStorage.getItem('host_' + code);
+  me = JSON.parse(localStorage.getItem('p_' + code) || 'null');
+  if (!isHost && !me) return joinForm();
+  start();
+})();
+
+function landing() {
+  app.innerHTML = `<h2>Host a game</h2><button class="btn" onclick="hostGame()">📺 Create room (teacher screen)</button>
+  <h2>Or join</h2><input type="text" id="rc" placeholder="Room code" maxlength="4" style="text-transform:uppercase;text-align:center">
+  <button class="btn" onclick="location.search='?room='+$('#rc').value.trim().toUpperCase()">📱 Join</button>`;
+}
+async function hostGame() {
+  const c = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const {error} = await sb.from('rooms').insert({code: c});
+  if (error) return alert(error.message);
+  localStorage.setItem('host_' + c, '1');
+  location.search = '?room=' + c;
+}
+function joinForm() {
+  app.innerHTML = `<h2>Room <span class="code">${esc(code)}</span></h2>
+  <input type="text" id="nm" placeholder="Your name" maxlength="30">
+  <button class="btn" onclick="join()">Join game</button>`;
+}
+async function join() {
+  const name = $('#nm').value.trim();
+  if (!name) return;
+  const id = crypto.randomUUID();
+  const {error} = await sb.from('players').insert({id, room_code: code, name});
+  if (error) return alert(error.message);
+  me = {id, name};
+  localStorage.setItem('p_' + code, JSON.stringify(me));
+  start();
+}
+
+// ---------- Sync (realtime + polling fallback) ----------
+function start() {
+  sb.channel('room-' + code).on('postgres_changes', {event: '*', schema: 'public'}, refresh).subscribe();
+  setInterval(refresh, 2500);
+  refresh();
+}
+async function refresh() {
+  const q = t => sb.from(t).select('*').eq(t === 'rooms' ? 'code' : 'room_code', code);
+  const [r, p, s, v] = await Promise.all([q('rooms').maybeSingle(), q('players').order('joined_at'), q('statements').order('created_at'), q('votes')]);
+  S = {room: r.data, players: p.data || [], stmts: s.data || [], votes: v.data || []};
+  render();
+}
+function render() {
+  if (!S.room) return;
+  const key = !isHost && S.room.status === 'writing' && !S.stmts.some(s => s.player_id === me.id) ? 'form' : null;
+  if (key && lastKey === 'form') return; // don't wipe what the player is typing
+  lastKey = key;
+  app.innerHTML = isHost ? hostView() : playerView();
+}
+
+// ---------- Host actions ----------
+const setStatus = async s => { await sb.from('rooms').update({status: s}).eq('code', code); refresh(); };
+async function startVoting() {
+  await sb.from('rooms').update({status: 'voting', current_statement_id: S.stmts[0].id}).eq('code', code); refresh();
+}
+async function reveal() {
+  if (busy) return; busy = true;
+  const st = cur(), vs = S.votes.filter(v => v.statement_id === st.id);
+  const right = vs.filter(v => v.guess === st.lie_index), wrong = vs.length - right.length;
+  const d = {}; right.forEach(v => d[v.voter_id] = 10);          // +10 for spotting the lie
+  d[st.player_id] = (d[st.player_id] || 0) + 5 * wrong;          // +5 per player fooled
+  await Promise.all(Object.entries(d).map(([id, a]) => {
+    const p = S.players.find(x => x.id === id);
+    return p && sb.from('players').update({score: p.score + a}).eq('id', id);
+  }));
+  await sb.from('rooms').update({status: 'reveal'}).eq('code', code);
+  busy = false; refresh();
+}
+async function next() {
+  const n = S.stmts[S.stmts.findIndex(s => s.id === S.room.current_statement_id) + 1];
+  await sb.from('rooms').update(n ? {status: 'voting', current_statement_id: n.id} : {status: 'podium'}).eq('code', code);
+  refresh();
+}
+async function resetGame() {
+  await sb.from('votes').delete().eq('room_code', code);
+  await sb.from('statements').delete().eq('room_code', code);
+  await sb.from('players').update({score: 0}).eq('room_code', code);
+  await sb.from('rooms').update({status: 'lobby', current_statement_id: null}).eq('code', code);
+  refresh();
+}
+
+// ---------- Host view ----------
+function hostView() {
+  const r = S.room, st = cur(), n = S.players.length;
+  const link = location.origin + location.pathname + '?room=' + code;
+  if (r.status === 'lobby') return `<h2>Join with code <span class="code">${code}</span></h2>
+    <img class="qr" alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}">
+    <p class="muted">${esc(link)}</p><h3>${n} joined</h3>${chips()}
+    <button class="btn" ${n < 2 ? 'disabled' : ''} onclick="setStatus('writing')">▶ Start: write statements</button>`;
+  if (r.status === 'writing') return `<h2>✍️ Write 2 truths &amp; 1 lie</h2><p>${S.stmts.length}/${n} ready</p>${chips(true)}
+    <button class="btn" ${S.stmts.length < 2 ? 'disabled' : ''} onclick="startVoting()">🎯 Start guessing</button>`;
+  if (r.status === 'podium') return `<h2>🏆 Final podium</h2>${board()}<button class="btn" onclick="resetGame()">New game (same players)</button>`;
+  if (!st) return '<p>Loading...</p>';
+  const rev = r.status === 'reveal', vs = S.votes.filter(v => v.statement_id === st.id);
+  return `<p class="muted">${esc(nameOf(st.player_id))}'s statements · ${vs.length}/${Math.max(n - 1, 0)} votes</p>
+    <h2>Which one is the lie?</h2>` +
+    st.lines.map((l, i) => `<div class="opt ${rev ? (i === st.lie_index ? 'lie' : 'truth') : ''}">${i + 1}. ${esc(l)}${rev ? `<small>${vs.filter(v => v.guess === i).length} votes</small>` : ''}</div>`).join('') +
+    (rev ? `<h3>Scores</h3>${board()}<button class="btn" onclick="next()">Next ➡</button>`
+         : `<button class="btn stop" onclick="reveal()">🛑 Reveal the lie</button>`);
+}
+
+// ---------- Player view ----------
+async function submitForm() {
+  const lines = [0, 1, 2].map(i => $('#l' + i).value.trim()), lie = document.querySelector('input[name=lie]:checked');
+  if (lines.some(l => l.length < 3) || !lie) return alert('Write all three statements and mark the lie.');
+  const {error} = await sb.from('statements').upsert({room_code: code, player_id: me.id, lines, lie_index: +lie.value}, {onConflict: 'room_code,player_id'});
+  if (error) return alert(error.message);
+  lastKey = null; refresh();
+}
+async function vote(i) {
+  await sb.from('votes').insert({room_code: code, statement_id: cur().id, voter_id: me.id, guess: i});
+  refresh();
+}
+function playerView() {
+  const r = S.room, st = cur(), head = `<p class="muted">Room ${code} · ${esc(me.name)} · <b>${S.players.find(p => p.id === me.id)?.score ?? 0} pts</b></p>`;
+  if (r.status === 'lobby') return head + '<h2>You\'re in! 🎉</h2><p>Waiting for the host to start...</p>' + chips();
+  if (r.status === 'writing') {
+    if (S.stmts.some(s => s.player_id === me.id)) return head + '<h2>Submitted ✓</h2><p>Waiting for the others...</p>';
+    return head + '<h2>Write 2 truths &amp; 1 lie</h2>' + [0, 1, 2].map(i => `<div class="row"><textarea id="l${i}" maxlength="140" placeholder="Statement ${i + 1}"></textarea>
+      <label><input type="radio" name="lie" value="${i}"> the lie</label></div>`).join('') +
+      '<button class="btn" onclick="submitForm()">Send</button>';
+  }
+  if (r.status === 'podium') return head + '<h2>🏆 Podium</h2>' + board();
+  if (!st) return head + '<p>Loading...</p>';
+  const mine = st.player_id === me.id, my = S.votes.find(v => v.statement_id === st.id && v.voter_id === me.id);
+  if (r.status === 'voting') {
+    if (mine) return head + '<h2>Your statements are on screen 😏</h2><p>Keep a poker face!</p>';
+    if (my) return head + '<h2>Vote locked 🔒</h2><p>Waiting for the reveal...</p>';
+    return head + `<h2>${esc(nameOf(st.player_id))}'s statements: which is the lie?</h2>` +
+      st.lines.map((l, i) => `<button class="opt" onclick="vote(${i})">${i + 1}. ${esc(l)}</button>`).join('');
+  }
+  // reveal
+  const res = mine ? 'Let\'s see how many you fooled!' : !my ? 'You did not vote.' : my.guess === st.lie_index ? '✅ You spotted the lie! +10' : '❌ You got fooled!';
+  return head + `<h2>${res}</h2>` + st.lines.map((l, i) => `<div class="opt ${i === st.lie_index ? 'lie' : 'truth'}">${esc(l)}</div>`).join('') + '<p>Waiting for the next one...</p>';
+}
+</script>
+</body>
+</html>
